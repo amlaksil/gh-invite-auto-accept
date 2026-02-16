@@ -1,0 +1,92 @@
+name: Accept EaglepointAiLabs Invites
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  accept-invitations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Accept matching repository invitations
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.INVITE_ACCEPT_TOKEN }}
+          script: |
+            const targetLogin = 'eaglepointAiLabs';
+            let page = 1;
+            const per_page = 100;
+            const invitations = [];
+
+            while (true) {
+              const response = await github.request('GET /user/repository_invitations', {
+                per_page,
+                page,
+              });
+
+              const batch = response.data || [];
+              invitations.push(...batch);
+
+              if (batch.length < per_page) {
+                break;
+              }
+
+              page += 1;
+            }
+
+            core.info(`Total pending invitations found: ${invitations.length}`);
+
+            const matches = invitations.filter((invitation) => {
+              const inviter = invitation.inviter?.login;
+              const owner = invitation.repository?.owner?.login;
+              return inviter === targetLogin || owner === targetLogin;
+            });
+
+            core.info(`Matching invitations found: ${matches.length}`);
+
+            let acceptedCount = 0;
+            let failedCount = 0;
+            const acceptedRepos = [];
+            const failedRepos = [];
+
+            for (const invitation of matches) {
+              const repoFullName = invitation.repository?.full_name || 'unknown-repo';
+              const invitationId = invitation.id;
+
+              try {
+                await github.request('PATCH /user/repository_invitations/{invitation_id}', {
+                  invitation_id: invitationId,
+                });
+                acceptedCount += 1;
+                acceptedRepos.push(`${repoFullName} (#${invitationId})`);
+                core.info(`Accepted invitation ${invitationId} for ${repoFullName}`);
+              } catch (error) {
+                failedCount += 1;
+                failedRepos.push(`${repoFullName} (#${invitationId})`);
+                core.warning(
+                  `Could not accept invitation ${invitationId} for ${repoFullName}: ${error.message}`
+                );
+              }
+            }
+
+            const resultMessage = `Invitation processing complete. Total=${invitations.length}, Matches=${matches.length}, Accepted=${acceptedCount}, Failed=${failedCount}`;
+            core.info(resultMessage);
+
+            core.setOutput('total_invitations', invitations.length);
+            core.setOutput('matching_invitations', matches.length);
+            core.setOutput('accepted_invitations', acceptedCount);
+            core.setOutput('failed_invitations', failedCount);
+
+            await core.summary
+              .addHeading('Invitation Acceptance Summary')
+              .addRaw(`- Total pending invitations: ${invitations.length}\n`)
+              .addRaw(`- Matching invitations: ${matches.length}\n`)
+              .addRaw(`- Accepted invitations: ${acceptedCount}\n`)
+              .addRaw(`- Failed invitations: ${failedCount}\n`)
+              .addRaw(acceptedRepos.length ? `\nAccepted:\n${acceptedRepos.map((item) => `- ${item}`).join('\n')}\n` : '')
+              .addRaw(failedRepos.length ? `\nFailed:\n${failedRepos.map((item) => `- ${item}`).join('\n')}\n` : '')
+              .write();
