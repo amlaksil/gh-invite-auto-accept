@@ -9,57 +9,100 @@ permissions:
   contents: read
 
 jobs:
-  accept-invitations:
+  accept:
     runs-on: ubuntu-latest
     steps:
       - name: Accept matching repository invitations
+        id: accept_invites
         uses: actions/github-script@v7
+        env:
+          TARGET_ORG: eaglepointAiLabs
         with:
           github-token: ${{ secrets.INVITE_ACCEPT_TOKEN }}
+          result-encoding: string
           script: |
-            const targetLogin = 'eaglepointAiLabs';
-            let page = 1;
-            const per_page = 100;
-            const invitations = [];
+            const targetOrg = process.env.TARGET_ORG;
+            const accepted = [];
+            const failed = [];
 
-            while (true) {
-              const response = await github.request('GET /user/repository_invitations', {
-                per_page,
-                page,
-              });
+            const invitations = await github.paginate('GET /user/repository_invitations', {
+              per_page: 100,
+            });
 
-              const batch = response.data || [];
-              invitations.push(...batch);
-
-              if (batch.length < per_page) {
-                break;
-              }
-
-              page += 1;
-            }
-
-            core.info(`Total pending invitations found: ${invitations.length}`);
+            core.info(`Found ${invitations.length} pending invitation(s).`);
 
             const matches = invitations.filter((invitation) => {
               const inviter = invitation.inviter?.login;
               const owner = invitation.repository?.owner?.login;
-              return inviter === targetLogin || owner === targetLogin;
+              return inviter === targetOrg || owner === targetOrg;
             });
 
-            core.info(`Matching invitations found: ${matches.length}`);
+            core.info(`Matching invitation(s): ${matches.length}.`);
 
             for (const invitation of matches) {
-              const repoFullName = invitation.repository?.full_name || 'unknown-repo';
               const invitationId = invitation.id;
+              const fullName = invitation.repository?.full_name ?? 'unknown/unknown';
 
               try {
                 await github.request('PATCH /user/repository_invitations/{invitation_id}', {
                   invitation_id: invitationId,
                 });
-                core.info(`Accepted invitation ${invitationId} for ${repoFullName}`);
+
+                accepted.push({ id: invitationId, repo: fullName });
+                core.info(`Accepted invitation ${invitationId} for ${fullName}`);
               } catch (error) {
-                core.warning(
-                  `Could not accept invitation ${invitationId} for ${repoFullName}: ${error.message}`
-                );
+                failed.push({
+                  id: invitationId,
+                  repo: fullName,
+                  message: error?.message ?? 'Unknown error',
+                });
+                core.warning(`Failed to accept invitation ${invitationId} for ${fullName}: ${error?.message ?? 'Unknown error'}`);
               }
             }
+
+            core.setOutput('total_invitations', String(invitations.length));
+            core.setOutput('matching_invitations', String(matches.length));
+            core.setOutput('accepted_invitations', String(accepted.length));
+            core.setOutput('failed_invitations', String(failed.length));
+
+            core.info(
+              `Aggregate results: Total=${invitations.length}, Matches=${matches.length}, Accepted=${accepted.length}, Failed=${failed.length}`
+            );
+
+            await core.summary
+              .addHeading('Invitation acceptance summary')
+              .addTable([
+                [
+                  { data: 'Metric', header: true },
+                  { data: 'Value', header: true },
+                ],
+                ['Total invitations', String(invitations.length)],
+                ['Matching invitations', String(matches.length)],
+                ['Accepted invitations', String(accepted.length)],
+                ['Failed invitations', String(failed.length)],
+              ]);
+
+            if (accepted.length > 0) {
+              await core.summary.addHeading('Accepted invitations', 2);
+              for (const item of accepted) {
+                await core.summary.addList([`✅ ${item.id} - ${item.repo}`]);
+              }
+            }
+
+            if (failed.length > 0) {
+              await core.summary.addHeading('Failed invitations', 2);
+              for (const item of failed) {
+                await core.summary.addList([`❌ ${item.id} - ${item.repo} (${item.message})`]);
+              }
+            }
+
+            await core.summary.write();
+
+            return `Accepted ${accepted.length} invitation(s); failed ${failed.length}.`;
+
+      - name: Echo outputs
+        run: |
+          echo "total_invitations=${{ steps.accept_invites.outputs.total_invitations }}"
+          echo "matching_invitations=${{ steps.accept_invites.outputs.matching_invitations }}"
+          echo "accepted_invitations=${{ steps.accept_invites.outputs.accepted_invitations }}"
+          echo "failed_invitations=${{ steps.accept_invites.outputs.failed_invitations }}"

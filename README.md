@@ -33,6 +33,41 @@ To run manually:
 2. Select **Accept EaglepointAiLabs Invites**.
 3. Click **Run workflow**.
 
+## How to confirm it worked
+
+After a run starts, open the workflow run and check both the step logs and the run summary.
+
+### 1) Step logs (source of truth)
+
+In the **Accept matching repository invitations** step, look for:
+
+- Per-invitation success lines: `Accepted invitation <id> for <owner/repo>`
+- Per-invitation failure lines: `Failed to accept invitation <id> for <owner/repo>: <error>`
+- Final aggregate line: `Aggregate results: Total=<n>, Matches=<n>, Accepted=<n>, Failed=<n>`
+
+A clean successful run for matching invites will typically end with `Failed=0`.
+
+### 2) Run summary (quick view)
+
+The workflow also writes a **run summary** with:
+
+- totals (`Total invitations`, `Matching invitations`, `Accepted invitations`, `Failed invitations`)
+- an **Accepted invitations** list
+- a **Failed invitations** list (only shown when failures exist)
+
+This gives a fast, human-readable confirmation without scanning all raw logs.
+
+### 3) Step outputs (structured values)
+
+The workflow sets these outputs on the invitation step:
+
+- `total_invitations`
+- `matching_invitations`
+- `accepted_invitations`
+- `failed_invitations`
+
+These values are echoed in the next step so they are easy to inspect in the logs and reusable by future workflow steps.
+
 ## Security notes for a public automation repo
 
 - Repository secrets are encrypted and not exposed to normal workflow logs.
