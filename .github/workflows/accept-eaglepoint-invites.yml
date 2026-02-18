@@ -26,16 +26,44 @@ jobs:
             exit 1
           fi
 
+          # Normalize accidental copy/paste whitespace/newlines in the secret value.
+          token="$(printf '%s' "${INVITE_ACCEPT_TOKEN}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ -z "${token}" ]]; then
+            echo "INVITE_ACCEPT_TOKEN resolved to empty after trimming whitespace."
+            exit 1
+          fi
+
           api_base="https://api.github.com"
-          auth_header="Authorization: Bearer ${INVITE_ACCEPT_TOKEN}"
+          auth_header="Authorization: Bearer ${token}"
           accept_header="Accept: application/vnd.github+json"
           api_version_header="X-GitHub-Api-Version: 2022-11-28"
 
-          invitations_json="$(curl -fsSL \
+          auth_status="$(curl -sS -o /tmp/gh_auth_check.json -w "%{http_code}" \
+            -H "${accept_header}" \
+            -H "${auth_header}" \
+            -H "${api_version_header}" \
+            "${api_base}/user")"
+
+          if [[ "${auth_status}" != "200" ]]; then
+            auth_message="$(jq -r '.message // "Unknown error"' /tmp/gh_auth_check.json 2>/dev/null || echo "Unknown error")"
+            echo "GitHub token auth check failed with HTTP ${auth_status}: ${auth_message}"
+            echo "Most common causes: invalid/revoked token, wrong secret value, or pasted extra characters."
+            exit 1
+          fi
+
+          invitations_status="$(curl -sS -o /tmp/gh_invitations.json -w "%{http_code}" \
             -H "${accept_header}" \
             -H "${auth_header}" \
             -H "${api_version_header}" \
             "${api_base}/user/repository_invitations?per_page=100")"
+
+          if [[ "${invitations_status}" != "200" ]]; then
+            invitations_message="$(jq -r '.message // "Unknown error"' /tmp/gh_invitations.json 2>/dev/null || echo "Unknown error")"
+            echo "Failed to fetch invitations (HTTP ${invitations_status}): ${invitations_message}"
+            exit 1
+          fi
+
+          invitations_json="$(cat /tmp/gh_invitations.json)"
 
           total_invitations="$(jq 'length' <<< "${invitations_json}")"
           echo "Found ${total_invitations} pending invitation(s)."
