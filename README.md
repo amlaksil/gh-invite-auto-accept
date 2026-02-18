@@ -24,7 +24,7 @@ Workflow file: `.github/workflows/accept-eaglepoint-invites.yml`
 
 Triggers:
 
-- `schedule`: every 10 minutes
+- `schedule`: once daily at `10:00 AM EAT` (`07:00 UTC`)
 - `workflow_dispatch`: manual run from the Actions tab
 
 To run manually:
